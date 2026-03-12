@@ -1,364 +1,259 @@
+# app.py
+# MBA Tax Optimizer - Updated with correct new regime exemption handling
+
 import streamlit as st
 import pandas as pd
 import numpy as np
+from io import StringIO
+from datetime import date
 
 st.set_page_config(page_title="MBA Tax Optimizer", layout="wide")
 
-# -----------------------------
-# TAX RULES (EDIT WHEN NEEDED)
-# -----------------------------
+# -------------------------
+# EDITABLE RULES / PARAMETERS
+# -------------------------
+RULES = {
+    "fy": "2025-26",
+    "standard_deduction": 50000,
+    "80c_limit": 150000,
+    "80ccd_1b_limit": 50000,
+    "hra_metro_pct": 0.50,
+    "hra_nonmetro_pct": 0.40,
+    "cess_rate": 0.04,
+    "tax_slabs_old": [
+        {"upto": 250000, "rate": 0.0},
+        {"upto": 500000, "rate": 0.05},
+        {"upto": 1000000, "rate": 0.20},
+        {"upto": 999999999, "rate": 0.30}
+    ],
+    "tax_slabs_new": [
+        {"upto": 300000, "rate": 0.0},
+        {"upto": 600000, "rate": 0.05},
+        {"upto": 900000, "rate": 0.10},
+        {"upto": 1200000, "rate": 0.15},
+        {"upto": 1500000, "rate": 0.20},
+        {"upto": 999999999, "rate": 0.30}
+    ],
+    "new_regime_allowed": {
+        "standard_deduction": True,
+        "80ccd_1b": True
+    }
+}
 
-STANDARD_DEDUCTION = 50000
-LIMIT_80C = 150000
-LIMIT_NPS = 50000
-CESS = 0.04
+# -------------------------
+# Helper / Tax functions
+# -------------------------
 
+def compute_hra_exemption(basic, da, hra_received, rent_paid, is_metro):
+    salary_for_hra = basic + da
+    pct = RULES["hra_metro_pct"] if is_metro else RULES["hra_nonmetro_pct"]
+    limit_pct = pct * salary_for_hra
+    rent_minus_10pct = max(0, rent_paid - 0.10 * salary_for_hra)
+    hra_exemption = min(hra_received, limit_pct, rent_minus_10pct)
+    return round(max(0, hra_exemption), 0)
 
-OLD_SLABS = [
-    (250000,0),
-    (500000,0.05),
-    (1000000,0.20),
-    (999999999,0.30)
-]
-
-
-NEW_SLABS = [
-    (300000,0),
-    (600000,0.05),
-    (900000,0.10),
-    (1200000,0.15),
-    (1500000,0.20),
-    (999999999,0.30)
-]
-
-# -----------------------------
-# TAX FUNCTION
-# -----------------------------
-
-def calculate_tax(income, slabs):
-
-    tax=0
-    prev=0
-
-    for limit,rate in slabs:
-
-        if income>limit:
-            tax+=(limit-prev)*rate
-            prev=limit
-
-        else:
-            tax+=(income-prev)*rate
+def tax_from_slabs(taxable_income, slabs):
+    tax = 0.0
+    previous = 0
+    for slab in slabs:
+        upto = slab["upto"]
+        rate = slab["rate"]
+        if taxable_income <= previous:
             break
+        taxable_here = min(taxable_income, upto) - previous
+        if taxable_here > 0:
+            tax += taxable_here * rate
+        previous = upto
+    tax = tax * (1 + RULES["cess_rate"])
+    return round(tax, 0)
 
-    tax=tax*(1+CESS)
+def compute_old_regime_tax(gross_income, exemptions_sum, deductions):
 
-    return int(tax)
+    taxable = gross_income - exemptions_sum
+    taxable -= deductions.get("standard_deduction", 0)
+    taxable -= deductions.get("80c", 0)
+    taxable -= deductions.get("80ccd_1b", 0)
+    taxable -= deductions.get("80d", 0)
+    taxable -= deductions.get("80e", 0)
+    taxable -= deductions.get("home_loan_interest", 0)
 
+    taxable = max(0, round(taxable))
 
-# -----------------------------
-# HRA CALCULATION
-# -----------------------------
+    tax = tax_from_slabs(taxable, RULES["tax_slabs_old"])
 
-def hra_exemption(hra,basic,rent,metro):
+    return int(tax), int(taxable)
 
-    if metro:
-        limit=0.5*basic
-    else:
-        limit=0.4*basic
+def compute_new_regime_tax(gross_income, allowed_deductions):
 
-    rent_cond=rent-0.1*basic
+    taxable = gross_income
 
-    return max(0,min(hra,limit,rent_cond))
+    if RULES["new_regime_allowed"].get("standard_deduction", False):
+        taxable -= allowed_deductions.get("standard_deduction", 0)
 
+    if RULES["new_regime_allowed"].get("80ccd_1b", False):
+        taxable -= allowed_deductions.get("80ccd_1b", 0)
 
-# -----------------------------
+    taxable = max(0, round(taxable))
+
+    tax = tax_from_slabs(taxable, RULES["tax_slabs_new"])
+
+    return int(tax), int(taxable)
+
+def estimate_marginal_rate_old(taxable_income):
+
+    for slab in RULES["tax_slabs_old"]:
+        if taxable_income <= slab["upto"]:
+            return slab["rate"]
+
+    return RULES["tax_slabs_old"][-1]["rate"]
+
+def marginal_tax_rate_for_income_old(taxable_income):
+
+    base = estimate_marginal_rate_old(taxable_income)
+
+    return base * (1 + RULES["cess_rate"])
+
+def money(x):
+    return f"₹{int(x):,}"
+
+# -------------------------
 # UI
-# -----------------------------
+# -------------------------
 
-st.title("MBA Salary Tax Optimizer")
+st.title("MBA Tax Optimizer — Expanded Questionnaire")
+st.caption(f"FY: {RULES['fy']}")
 
-st.write(
-"""
-Compare **Old vs New tax regimes**  
-and simulate **salary restructuring strategies**.
-"""
-)
+with st.expander("Quick guide"):
+    st.write("""
+    - Estimate Basic as ~35-45% of salary if unknown
+    - Mark reimbursements only if bills required
+    - 80C includes EPF, PPF, ELSS, Life insurance etc
+    """)
 
-col1,col2=st.columns([2,3])
+col_left, col_right = st.columns([2,3])
 
-# --------------------------------
-# SECTION 1 COMPENSATION
-# --------------------------------
+with col_left:
 
-with col1:
+    st.header("Accommodation")
 
-    st.header("Compensation")
+    is_metro = st.radio("City type", ["Metro","Non-Metro"])=="Metro"
 
-    fixed_salary=st.number_input("Fixed Salary",value=2000000)
+    lives_rented = st.radio("Live in rented house?",["Yes","No"])=="Yes"
 
-    joining_bonus=st.number_input("Joining Bonus",value=0)
+    rent_annual=0
 
-    relocation_bonus=st.number_input("Relocation Bonus",value=0)
+    if lives_rented:
+        rent_annual=st.number_input("Annual Rent",value=240000)
 
-    performance_bonus=st.number_input("Annual Incentive / Bonus",value=0)
+    st.header("Salary")
 
-    gross_income=(
-        fixed_salary
-        +joining_bonus
-        +relocation_bonus
-        +performance_bonus
-    )
+    ctc = st.number_input("Total Fixed Salary",value=1800000)
 
-    st.success(f"Gross Income = ₹{gross_income:,}")
+    variable_pay = st.number_input("Variable / Bonus Pay",value=200000)
 
+    basic = st.number_input("Basic",value=720000)
 
-# --------------------------------
-# SALARY BREAKDOWN
-# --------------------------------
+    da = st.number_input("DA",value=0)
 
-with col1:
+    hra = st.number_input("HRA",value=288000)
 
-    st.header("Salary Breakdown")
+    special_allowance = st.number_input("Special Allowance",value=200000)
 
-    basic=st.number_input("Basic Salary",value=800000)
+    st.header("Allowances")
 
-    hra=st.number_input("HRA Received",value=300000)
+    internet_allowance = st.number_input("Internet",value=0)
 
-    special_allowance=st.number_input("Special Allowance",value=400000)
+    phone_allowance = st.number_input("Phone",value=0)
 
-    employer_pf=st.number_input("Employer PF",value=0)
+    conveyance_allowance = st.number_input("Conveyance",value=0)
 
-    employer_nps=st.number_input("Employer NPS",value=0)
+    meal_voucher = st.number_input("Meal",value=0)
 
-    gratuity=st.number_input("Gratuity",value=0)
+    lta_claimed = st.number_input("LTA",value=0)
 
-
-# --------------------------------
-# ALLOWANCES
-# --------------------------------
-
-with col1:
-
-    st.header("Allowances / Reimbursements")
-
-    rent=st.number_input("Annual Rent Paid",value=240000)
-
-    metro=st.checkbox("Metro City")
-
-    internet=st.number_input("Internet Reimbursement",value=0)
-
-    phone=st.number_input("Phone Reimbursement",value=0)
-
-    conveyance=st.number_input("Conveyance",value=0)
-
-    meal=st.number_input("Meal Vouchers",value=0)
-
-    lta=st.number_input("LTA Claimed",value=0)
-
-# --------------------------------
-# DEDUCTIONS
-# --------------------------------
-
-with col2:
+with col_right:
 
     st.header("Deductions")
 
-    st.subheader("80C Investments")
+    invest_80c = st.number_input("80C",value=150000)
 
-    st.write(
-    """
-    Examples of 80C investments:
+    nps_employee = st.number_input("NPS 80CCD(1B)",value=50000)
 
-    EPF  
-    PPF  
-    ELSS mutual funds  
-    Life insurance  
-    Home loan principal
-    """
-    )
+    health_insurance = st.number_input("Health Insurance 80D",value=25000)
 
-    invest_80c=st.number_input("Total 80C Investments",value=150000)
+    education_loan_interest = st.number_input("Education Loan Interest 80E",value=0)
 
-    nps=st.number_input("NPS Contribution (80CCD1B)",value=50000)
+    home_loan_interest = st.number_input("Home Loan Interest",value=0)
 
-    health=st.number_input("Health Insurance (80D)",value=25000)
+if st.button("Run full analysis"):
 
-    edu_loan=st.number_input("Education Loan Interest (80E)",value=0)
+    gross_income = ctc + variable_pay
 
-    home_interest=st.number_input("Home Loan Interest",value=0)
+    hra_exempt = compute_hra_exemption(basic,da,hra,rent_annual,is_metro) if lives_rented else 0
 
+    reimbursements = internet_allowance + phone_allowance + conveyance_allowance + meal_voucher
 
-# --------------------------------
-# RUN ANALYSIS
-# --------------------------------
+    exemptions_old = hra_exempt + reimbursements + lta_claimed
 
-if st.button("Run Analysis"):
+    deductions = {
+        "standard_deduction": RULES["standard_deduction"],
+        "80c": min(invest_80c,RULES["80c_limit"]),
+        "80ccd_1b": min(nps_employee,RULES["80ccd_1b_limit"]),
+        "80d": health_insurance,
+        "80e": education_loan_interest,
+        "home_loan_interest": home_loan_interest
+    }
 
-    hra_exempt=hra_exemption(hra,basic,rent,metro)
+    old_tax, old_taxable = compute_old_regime_tax(gross_income,exemptions_old,deductions)
 
-    reimbursements=internet+phone+conveyance+meal
+    allowed_new = {
+        "standard_deduction": RULES["standard_deduction"],
+        "80ccd_1b": min(nps_employee,RULES["80ccd_1b_limit"])
+    }
 
-    exemptions_old=hra_exempt+reimbursements+lta
+    new_tax, new_taxable = compute_new_regime_tax(gross_income,allowed_new)
 
-
-    deductions_old=(
-        STANDARD_DEDUCTION
-        +min(invest_80c,LIMIT_80C)
-        +min(nps,LIMIT_NPS)
-        +health
-        +edu_loan
-        +home_interest
-    )
-
-
-    taxable_old=gross_income-exemptions_old-deductions_old
-
-    tax_old=calculate_tax(taxable_old,OLD_SLABS)
-
-
-# ---------------------------
-# NEW REGIME FIX
-# ---------------------------
-
-    taxable_new=gross_income-STANDARD_DEDUCTION
-
-    tax_new=calculate_tax(taxable_new,NEW_SLABS)
-
-
-# --------------------------------
-# TABLE OUTPUT
-# --------------------------------
-
-    df=pd.DataFrame({
+    summary = pd.DataFrame({
 
         "Component":[
-        "Gross Income",
-        "Exemptions (Old only)",
-        "Deductions",
-        "Taxable Income",
-        "Estimated Tax"
+            "Gross Income",
+            "Exemptions (Old only)",
+            "Deductions",
+            "Taxable Income",
+            "Estimated Tax"
         ],
 
         "Old Regime":[
-        gross_income,
-        exemptions_old,
-        deductions_old,
-        taxable_old,
-        tax_old
+            gross_income,
+            exemptions_old,
+            deductions["standard_deduction"]
+            + deductions["80c"]
+            + deductions["80ccd_1b"]
+            + deductions["80d"]
+            + deductions["80e"]
+            + deductions["home_loan_interest"],
+            old_taxable,
+            old_tax
         ],
 
         "New Regime":[
-        gross_income,
-        0,
-        STANDARD_DEDUCTION,
-        taxable_new,
-        tax_new
+            gross_income,
+            0,
+            allowed_new["standard_deduction"] + allowed_new["80ccd_1b"],
+            new_taxable,
+            new_tax
         ]
 
     })
 
-    st.subheader("Side-by-side: Old vs New Regime")
+    st.subheader("Old vs New")
 
-    st.table(df)
+    st.table(summary)
 
+    if old_tax < new_tax:
 
-# --------------------------------
-# RECOMMENDATION
-# --------------------------------
-
-    if tax_old<tax_new:
-
-        st.success(f"Old Regime Recommended — Save ₹{tax_new-tax_old:,}")
+        st.success(f"Old Regime Better — Save {money(new_tax-old_tax)}")
 
     else:
 
-        st.success(f"New Regime Recommended — Save ₹{tax_old-tax_new:,}")
-
-
-# --------------------------------
-# MISSED DEDUCTIONS
-# --------------------------------
-
-    st.subheader("Missed Deduction Opportunities")
-
-    if invest_80c<LIMIT_80C:
-
-        st.write(
-        f"Invest ₹{LIMIT_80C-invest_80c:,} more under 80C."
-        )
-
-    if nps<LIMIT_NPS:
-
-        st.write(
-        f"Invest ₹{LIMIT_NPS-nps:,} more in NPS."
-        )
-
-    if edu_loan>0:
-
-        st.write("Education loan interest fully deductible under 80E.")
-
-
-# --------------------------------
-# OPTIMIZATION SIMULATOR
-# --------------------------------
-
-    st.subheader("Salary Optimization Simulator")
-
-    move_hra=st.slider(
-        "Move Special Allowance → HRA",
-        0,
-        int(special_allowance),
-        0
-    )
-
-    convert_reimb=st.slider(
-        "Convert Allowance → Reimbursements",
-        0,
-        int(special_allowance),
-        0
-    )
-
-    invest_more_80c=st.slider(
-        "Increase 80C Investment",
-        0,
-        LIMIT_80C,
-        0
-    )
-
-    invest_more_nps=st.slider(
-        "Increase NPS",
-        0,
-        LIMIT_NPS,
-        0
-    )
-
-
-    new_hra=hra+move_hra
-
-    new_special=special_allowance-move_hra-convert_reimb
-
-    hra_new=hra_exemption(new_hra,basic,rent,metro)
-
-
-    exemptions_sim=hra_new+reimbursements+lta+convert_reimb
-
-    deductions_sim=(
-        STANDARD_DEDUCTION
-        +min(invest_80c+invest_more_80c,LIMIT_80C)
-        +min(nps+invest_more_nps,LIMIT_NPS)
-        +health
-        +edu_loan
-        +home_interest
-    )
-
-
-    taxable_sim=gross_income-exemptions_sim-deductions_sim
-
-    tax_sim=calculate_tax(taxable_sim,OLD_SLABS)
-
-    savings=tax_old-tax_sim
-
-
-    st.write(f"Optimized Tax = ₹{tax_sim:,}")
-
-    st.success(f"Potential Savings = ₹{savings:,}")
+        st.success(f"New Regime Better — Save {money(old_tax-new_tax)}")
