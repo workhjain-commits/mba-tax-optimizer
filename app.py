@@ -262,38 +262,85 @@ if st.button("Run full analysis"):
 
     new_tax,new_taxable=compute_new_regime_tax(gross_income,allowed_new)
 
-    summary=pd.DataFrame({
+    summary = pd.DataFrame({
 
-        "Component":[
-            "Gross Income",
-            "Exemptions (Old only)",
-            "Deductions",
-            "Taxable Income",
-            "Estimated Tax"
-        ],
+"Component":[
+"Gross Income",
 
-        "Old Regime":[
-            gross_income,
-            exemptions_old,
-            deductions["standard_deduction"]
-            +deductions["80c"]
-            +deductions["80ccd_1b"]
-            +deductions["80d"]
-            +deductions["80e"]
-            +deductions["home_loan_interest"],
-            old_taxable,
-            old_tax
-        ],
+"Exemptions (Old only)",
+"  ↳ HRA Exemption",
+"  ↳ Internet Reimbursement",
+"  ↳ Phone Reimbursement",
+"  ↳ Conveyance",
+"  ↳ Meal Voucher",
+"  ↳ LTA",
 
-        "New Regime":[
-            gross_income,
-            0,
-            allowed_new["standard_deduction"]+allowed_new["80ccd_1b"],
-            new_taxable,
-            new_tax
-        ]
+"Deductions",
+"  ↳ Standard Deduction",
+"  ↳ 80C",
+"  ↳ NPS 80CCD(1B)",
+"  ↳ Health Insurance 80D",
+"  ↳ Education Loan Interest 80E",
+"  ↳ Home Loan Interest",
 
-    })
+"Taxable Income",
+"Estimated Tax"
+],
+
+"Old Regime":[
+gross_income,
+
+exemptions_old,
+hra_exempt,
+internet_allowance,
+phone_allowance,
+conveyance_allowance,
+meal_voucher,
+lta_claimed,
+
+deductions["standard_deduction"]
++ deductions["80c"]
++ deductions["80ccd_1b"]
++ deductions["80d"]
++ deductions["80e"]
++ deductions["home_loan_interest"],
+
+deductions["standard_deduction"],
+deductions["80c"],
+deductions["80ccd_1b"],
+deductions["80d"],
+deductions["80e"],
+deductions["home_loan_interest"],
+
+old_taxable,
+old_tax
+],
+
+"New Regime":[
+gross_income,
+
+0,
+0,
+0,
+0,
+0,
+0,
+0,
+
+allowed_new["standard_deduction"] + allowed_new["80ccd_1b"],
+
+allowed_new["standard_deduction"],
+0,
+allowed_new["80ccd_1b"],
+0,
+0,
+0,
+
+new_taxable,
+new_tax
+]
+
+})
 
     st.subheader("Old vs New")
 
