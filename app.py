@@ -1,5 +1,5 @@
 # app.py
-# MBA Tax Optimizer — Added compensation structure section (no other changes)
+# MBA Tax Optimizer — Added 80C breakup, employer PF field, and recommendations
 
 import streamlit as st
 import pandas as pd
@@ -48,11 +48,8 @@ RULES = {
 def compute_hra_exemption(basic,da,hra_received,rent_paid,is_metro):
 
     salary_for_hra=basic+da
-
     pct=RULES["hra_metro_pct"] if is_metro else RULES["hra_nonmetro_pct"]
-
     limit_pct=pct*salary_for_hra
-
     rent_minus_10pct=max(0,rent_paid-0.10*salary_for_hra)
 
     hra_exemption=min(hra_received,limit_pct,rent_minus_10pct)
@@ -120,6 +117,22 @@ def compute_new_regime_tax(gross_income,allowed_deductions):
     return int(tax),int(taxable)
 
 
+def estimate_marginal_rate_old(taxable_income):
+
+    for slab in RULES["tax_slabs_old"]:
+        if taxable_income<=slab["upto"]:
+            return slab["rate"]
+
+    return RULES["tax_slabs_old"][-1]["rate"]
+
+
+def marginal_with_cess(taxable_income):
+
+    base=estimate_marginal_rate_old(taxable_income)
+
+    return base*(1+RULES["cess_rate"])
+
+
 def money(x):
     return f"₹{int(x):,}"
 
@@ -175,6 +188,8 @@ with col_left:
 
     special_allowance=st.number_input("Special Allowance",value=200000)
 
+    employer_pf=st.number_input("Employer PF contribution",value=86400)
+
     st.header("Allowances")
 
     internet_allowance=st.number_input("Internet",value=0)
@@ -189,9 +204,25 @@ with col_left:
 
 with col_right:
 
-    st.header("Section D — Deductions")
+    st.header("Section D — 80C Breakup")
 
-    invest_80c=st.number_input("80C Investments",value=150000)
+    epf=st.number_input("EPF (Employee PF)",value=86400)
+
+    ppf=st.number_input("PPF",value=0)
+
+    elss=st.number_input("ELSS",value=0)
+
+    life_ins=st.number_input("Life Insurance Premium",value=0)
+
+    tax_fd=st.number_input("Tax Saving FD",value=0)
+
+    principal_home=st.number_input("Home Loan Principal",value=0)
+
+    sukanya=st.number_input("Sukanya / Other",value=0)
+
+    invest_80c=epf+ppf+elss+life_ins+tax_fd+principal_home+sukanya
+
+    st.header("Other Deductions")
 
     nps_employee=st.number_input("NPS 80CCD(1B)",value=50000)
 
@@ -267,6 +298,38 @@ if st.button("Run full analysis"):
     st.subheader("Old vs New")
 
     st.table(summary)
+
+# -------------------------
+# RECOMMENDATIONS
+# -------------------------
+
+    st.subheader("Recommendations")
+
+    marginal=marginal_with_cess(old_taxable)
+
+    if invest_80c<RULES["80c_limit"]:
+
+        gap=RULES["80c_limit"]-invest_80c
+
+        est_save=int(gap*marginal)
+
+        st.write(f"Invest additional {money(gap)} in 80C to save approx {money(est_save)} tax")
+
+    if nps_employee<RULES["80ccd_1b_limit"]:
+
+        gap=RULES["80ccd_1b_limit"]-nps_employee
+
+        est_save=int(gap*marginal)
+
+        st.write(f"Invest additional {money(gap)} in NPS to save approx {money(est_save)} tax")
+
+    if lives_rented and special_allowance>0:
+
+        st.write("Consider restructuring part of Special Allowance into HRA")
+
+    if reimbursements>0:
+
+        st.write("Convert allowances into proof-based reimbursements if company policy allows")
 
     if old_tax<new_tax:
 
