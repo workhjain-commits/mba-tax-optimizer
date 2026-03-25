@@ -1,5 +1,5 @@
 # app.py
-# MBA Tax Optimizer — Clean version with separate in-hand salary table
+# MBA Tax Optimizer — Final polished version
 
 import streamlit as st
 import pandas as pd
@@ -130,6 +130,7 @@ def money(x):
 
 st.title("MBA Tax Optimizer — Expanded Questionnaire")
 st.caption(f"FY {RULES['fy']}")
+st.warning("This tool is for educational use only and should not be treated as professional tax advice.")
 
 col_left, col_right = st.columns([2, 3])
 
@@ -237,7 +238,6 @@ if st.button("Run full analysis"):
     # MONTHLY IN-HAND CALCULATION
     # -------------------------
     # Monthly salary should be based ONLY on fixed pay
-    # So we calculate tax on fixed pay only
 
     old_tax_fixed_only, old_taxable_fixed_only = compute_old_regime_tax(
         fixed_pay,
@@ -359,6 +359,7 @@ if st.button("Run full analysis"):
 
     st.subheader("Annual Tax Summary")
     st.table(summary)
+    st.caption("Annual tax is calculated assuming 100% of the Non-Assured / Performance Bonus will be received during the financial year.")
 
     # -------------------------
     # MONTHLY IN-HAND TABLE
@@ -396,6 +397,52 @@ if st.button("Run full analysis"):
 
     st.caption("Monthly in-hand is calculated only on Fixed Pay. Joining bonus, relocation bonus and non-assured bonus are excluded from monthly salary calculation and are assumed to be taxed when received.")
 
+    # -------------------------
+    # MONTHLY TDS BREAKDOWN TABLE
+    # -------------------------
+
+    tds_breakdown_df = pd.DataFrame({
+        "Metric": [
+            "Fixed Pay Considered",
+            "Less: Exemptions Applied",
+            "Less: Deductions Applied",
+            "Taxable Income on Fixed Pay",
+            "Annual Tax on Fixed Pay",
+            "Monthly TDS"
+        ],
+        "Old Regime": [
+            int(round(fixed_pay)),
+            int(round(exemptions_old)),
+            int(round(
+                deductions_old["standard_deduction"]
+                + deductions_old["80c"]
+                + deductions_old["80ccd_1b"]
+                + deductions_old["80d"]
+                + deductions_old["80e"]
+                + deductions_old["home_loan_interest"]
+            )),
+            int(round(old_taxable_fixed_only)),
+            int(round(old_tax_fixed_only)),
+            int(round(monthly_tds_old))
+        ],
+        "New Regime": [
+            int(round(fixed_pay)),
+            0,
+            int(round(
+                allowed_new["standard_deduction"]
+                + allowed_new["80ccd_1b"]
+            )),
+            int(round(new_taxable_fixed_only)),
+            int(round(new_tax_fixed_only)),
+            int(round(monthly_tds_new))
+        ]
+    })
+
+    st.subheader("Monthly TDS Calculation Breakdown")
+    st.table(tds_breakdown_df)
+
+    st.caption("Monthly TDS is calculated as Annual Tax on Fixed Pay only ÷ 12. One-time payouts like Joining Bonus, Relocation Bonus and Non-Assured Bonus are excluded from this monthly TDS calculation.")
+
     st.caption(f"Employee PF used for in-hand calculation: {money(employee_pf_for_inhand)}")
     if employer_pf_included:
         st.caption(f"Employer PF removed from monthly fixed pay: {money(employer_pf)}")
@@ -428,3 +475,11 @@ if st.button("Run full analysis"):
         st.success(f"Old Regime Better — Save {money(new_tax - old_tax)}")
     else:
         st.success(f"New Regime Better — Save {money(old_tax - new_tax)}")
+
+    st.markdown("---")
+    st.caption(
+        "Disclaimer: This tool is built purely for educational and illustrative purposes to help users understand broad tax and salary structure concepts. "
+        "It is not tax, legal, financial, payroll, or investment advice and should not be relied upon as a binding professional opinion. "
+        "Actual tax liability, payroll deductions, exemptions, and take-home salary may vary based on employer payroll policies, declarations submitted, proofs furnished, timing of payouts, "
+        "state-specific rules, amendments in tax law, and individual circumstances. Users are strongly advised to verify final decisions with their HR/payroll team, Chartered Accountant (CA), or qualified tax professional before acting on the outputs of this tool."
+    )
