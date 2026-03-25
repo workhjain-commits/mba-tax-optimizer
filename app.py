@@ -1,5 +1,5 @@
 # app.py
-# MBA Tax Optimizer — Final version with in-hand salary logic for old and new regime
+# MBA Tax Optimizer — Clean version with separate in-hand salary table
 
 import streamlit as st
 import pandas as pd
@@ -15,7 +15,8 @@ st.set_page_config(page_title="MBA Tax Optimizer", layout="wide")
 
 RULES = {
     "fy": "2025-26",
-    "standard_deduction": 50000,
+    "standard_deduction_old": 50000,
+    "standard_deduction_new": 75000,
     "80c_limit": 150000,
     "80ccd_1b_limit": 50000,
     "hra_metro_pct": 0.50,
@@ -29,8 +30,8 @@ RULES = {
     ],
     "tax_slabs_new": [
         {"upto": 300000, "rate": 0},
-        {"upto": 600000, "rate": 0.05},
-        {"upto": 900000, "rate": 0.10},
+        {"upto": 700000, "rate": 0.05},
+        {"upto": 1000000, "rate": 0.10},
         {"upto": 1200000, "rate": 0.15},
         {"upto": 1500000, "rate": 0.20},
         {"upto": 999999999, "rate": 0.30}
@@ -211,8 +212,8 @@ if st.button("Run full analysis"):
     reimbursements = internet_allowance + phone_allowance + conveyance_allowance + meal_voucher
     exemptions_old = hra_exempt + reimbursements + lta_claimed
 
-    deductions = {
-        "standard_deduction": RULES["standard_deduction"],
+    deductions_old = {
+        "standard_deduction": RULES["standard_deduction_old"],
         "80c": min(invest_80c, RULES["80c_limit"]),
         "80ccd_1b": min(nps_employee, RULES["80ccd_1b_limit"]),
         "80d": health_insurance,
@@ -220,73 +221,58 @@ if st.button("Run full analysis"):
         "home_loan_interest": home_loan_interest
     }
 
-    # Main tax calculations
-    old_tax, old_taxable = compute_old_regime_tax(gross_income, exemptions_old, deductions)
-
     allowed_new = {
-        "standard_deduction": RULES["standard_deduction"],
+        "standard_deduction": RULES["standard_deduction_new"],
         "80ccd_1b": min(nps_employee, RULES["80ccd_1b_limit"])
     }
 
+    # -------------------------
+    # MAIN TAX CALCULATIONS (FULL ANNUAL)
+    # -------------------------
+
+    old_tax, old_taxable = compute_old_regime_tax(gross_income, exemptions_old, deductions_old)
     new_tax, new_taxable = compute_new_regime_tax(gross_income, 0, allowed_new)
 
-    # One-time tax calculations — OLD
-    old_tax_without_joining, _ = compute_old_regime_tax(gross_income - joining_bonus, exemptions_old, deductions)
-    joining_bonus_tax_old = old_tax - old_tax_without_joining
+    # -------------------------
+    # MONTHLY IN-HAND CALCULATION
+    # -------------------------
+    # Monthly salary should be based ONLY on fixed pay
+    # So we calculate tax on fixed pay only
 
-    old_tax_without_relocation, _ = compute_old_regime_tax(gross_income - relocation_bonus, exemptions_old, deductions)
-    relocation_bonus_tax_old = old_tax - old_tax_without_relocation
+    old_tax_fixed_only, old_taxable_fixed_only = compute_old_regime_tax(
+        fixed_pay,
+        exemptions_old,
+        deductions_old
+    )
 
-    old_tax_without_perf, _ = compute_old_regime_tax(gross_income - performance_bonus, exemptions_old, deductions)
-    performance_bonus_tax_old = old_tax - old_tax_without_perf
+    new_tax_fixed_only, new_taxable_fixed_only = compute_new_regime_tax(
+        fixed_pay,
+        0,
+        allowed_new
+    )
 
-    # One-time tax calculations — NEW
-    new_tax_without_joining, _ = compute_new_regime_tax(gross_income - joining_bonus, 0, allowed_new)
-    joining_bonus_tax_new = new_tax - new_tax_without_joining
+    monthly_tds_old = int(round(old_tax_fixed_only / 12))
+    monthly_tds_new = int(round(new_tax_fixed_only / 12))
 
-    new_tax_without_relocation, _ = compute_new_regime_tax(gross_income - relocation_bonus, 0, allowed_new)
-    relocation_bonus_tax_new = new_tax - new_tax_without_relocation
-
-    new_tax_without_perf, _ = compute_new_regime_tax(gross_income - performance_bonus, 0, allowed_new)
-    performance_bonus_tax_new = new_tax - new_tax_without_perf
-
-    # Monthly TDS after removing one-time taxes
-    monthly_tax_pool_old = max(0, old_tax - joining_bonus_tax_old - relocation_bonus_tax_old - performance_bonus_tax_old)
-    monthly_tax_pool_new = max(0, new_tax - joining_bonus_tax_new - relocation_bonus_tax_new - performance_bonus_tax_new)
-
-    monthly_tds_old = int(round(monthly_tax_pool_old / 12))
-    monthly_tds_new = int(round(monthly_tax_pool_new / 12))
-
-    # Employee PF for in-hand:
-    # If user enters it in salary breakup, use that.
-    # If they keep it 0 there, use EPF from 80C breakup.
+    # Employee PF for in-hand
+    # If salary breakup employee PF is 0, use EPF from 80C section
     employee_pf_for_inhand = employee_pf if employee_pf > 0 else epf
     employee_pf_monthly = int(round(employee_pf_for_inhand / 12))
 
-    # Monthly fixed salary pool:
-    # If employer PF is part of fixed pay, subtract it from monthly fixed pay.
+    # Monthly fixed salary available
     monthly_fixed_available = int(round(fixed_pay / 12))
+
     if employer_pf_included:
         monthly_fixed_available -= int(round(employer_pf / 12))
 
-    # Monthly in-hand
     monthly_in_hand_old = monthly_fixed_available - employee_pf_monthly - monthly_tds_old
     monthly_in_hand_new = monthly_fixed_available - employee_pf_monthly - monthly_tds_new
 
     annual_in_hand_old_excluding_one_time = monthly_in_hand_old * 12
     annual_in_hand_new_excluding_one_time = monthly_in_hand_new * 12
 
-    # Net receipts for one-time payouts
-    joining_bonus_net_old = joining_bonus - joining_bonus_tax_old
-    relocation_bonus_net_old = relocation_bonus - relocation_bonus_tax_old
-    performance_bonus_net_old = performance_bonus - performance_bonus_tax_old
-
-    joining_bonus_net_new = joining_bonus - joining_bonus_tax_new
-    relocation_bonus_net_new = relocation_bonus - relocation_bonus_tax_new
-    performance_bonus_net_new = performance_bonus - performance_bonus_tax_new
-
     # -------------------------
-    # MAIN SUMMARY TABLE
+    # MAIN TAX SUMMARY TABLE
     # -------------------------
 
     summary = pd.DataFrame({
@@ -310,15 +296,7 @@ if st.button("Run full analysis"):
             "  ↳ Home Loan Interest",
 
             "Taxable Income",
-            "Estimated Tax",
-
-            "Tax on Joining Bonus (one-time)",
-            "Tax on Relocation Bonus (one-time)",
-            "Tax on Non-Assured / Performance Bonus (one-time)",
-
-            "Monthly TDS (excluding one-time taxes)",
-            "Monthly In-Hand Salary",
-            "Annual In-Hand (excluding one-time payouts)"
+            "Estimated Tax"
         ],
 
         "Old Regime": [
@@ -333,31 +311,23 @@ if st.button("Run full analysis"):
             int(round(lta_claimed)),
 
             int(round(
-                deductions["standard_deduction"]
-                + deductions["80c"]
-                + deductions["80ccd_1b"]
-                + deductions["80d"]
-                + deductions["80e"]
-                + deductions["home_loan_interest"]
+                deductions_old["standard_deduction"]
+                + deductions_old["80c"]
+                + deductions_old["80ccd_1b"]
+                + deductions_old["80d"]
+                + deductions_old["80e"]
+                + deductions_old["home_loan_interest"]
             )),
 
-            int(round(deductions["standard_deduction"])),
-            int(round(deductions["80c"])),
-            int(round(deductions["80ccd_1b"])),
-            int(round(deductions["80d"])),
-            int(round(deductions["80e"])),
-            int(round(deductions["home_loan_interest"])),
+            int(round(deductions_old["standard_deduction"])),
+            int(round(deductions_old["80c"])),
+            int(round(deductions_old["80ccd_1b"])),
+            int(round(deductions_old["80d"])),
+            int(round(deductions_old["80e"])),
+            int(round(deductions_old["home_loan_interest"])),
 
             int(round(old_taxable)),
-            int(round(old_tax)),
-
-            int(round(joining_bonus_tax_old)),
-            int(round(relocation_bonus_tax_old)),
-            int(round(performance_bonus_tax_old)),
-
-            int(round(monthly_tds_old)),
-            int(round(monthly_in_hand_old)),
-            int(round(annual_in_hand_old_excluding_one_time))
+            int(round(old_tax))
         ],
 
         "New Regime": [
@@ -383,62 +353,48 @@ if st.button("Run full analysis"):
             0,
 
             int(round(new_taxable)),
-            int(round(new_tax)),
+            int(round(new_tax))
+        ]
+    })
 
-            int(round(joining_bonus_tax_new)),
-            int(round(relocation_bonus_tax_new)),
-            int(round(performance_bonus_tax_new)),
+    st.subheader("Annual Tax Summary")
+    st.table(summary)
 
+    # -------------------------
+    # MONTHLY IN-HAND TABLE
+    # -------------------------
+
+    inhand_df = pd.DataFrame({
+        "Metric": [
+            "Monthly Fixed Pay",
+            "Less: Employer PF (if included in fixed pay)",
+            "Less: Employee PF",
+            "Less: Monthly TDS",
+            "Final Monthly In-Hand",
+            "Annual In-Hand (excluding one-time payouts)"
+        ],
+        "Old Regime": [
+            int(round(fixed_pay / 12)),
+            int(round(employer_pf / 12)) if employer_pf_included else 0,
+            int(round(employee_pf_monthly)),
+            int(round(monthly_tds_old)),
+            int(round(monthly_in_hand_old)),
+            int(round(annual_in_hand_old_excluding_one_time))
+        ],
+        "New Regime": [
+            int(round(fixed_pay / 12)),
+            int(round(employer_pf / 12)) if employer_pf_included else 0,
+            int(round(employee_pf_monthly)),
             int(round(monthly_tds_new)),
             int(round(monthly_in_hand_new)),
             int(round(annual_in_hand_new_excluding_one_time))
         ]
     })
 
-    st.subheader("Old vs New")
-    st.table(summary)
-    st.caption("Rows show detailed breakup of exemptions, deductions, one-time taxes, and monthly in-hand logic.")
+    st.subheader("Monthly In-Hand Salary")
+    st.table(inhand_df)
 
-    # -------------------------
-    # ONE-TIME PAYOUT TABLE
-    # -------------------------
-
-    st.subheader("One-Time Payouts (Net After Tax)")
-
-    one_time_df = pd.DataFrame({
-        "Component": [
-            "Joining Bonus",
-            "Relocation Bonus",
-            "Non-Assured / Performance Bonus"
-        ],
-        "Gross Amount": [
-            int(round(joining_bonus)),
-            int(round(relocation_bonus)),
-            int(round(performance_bonus))
-        ],
-        "Old Tax Deducted": [
-            int(round(joining_bonus_tax_old)),
-            int(round(relocation_bonus_tax_old)),
-            int(round(performance_bonus_tax_old))
-        ],
-        "Old Net Received": [
-            int(round(joining_bonus_net_old)),
-            int(round(relocation_bonus_net_old)),
-            int(round(performance_bonus_net_old))
-        ],
-        "New Tax Deducted": [
-            int(round(joining_bonus_tax_new)),
-            int(round(relocation_bonus_tax_new)),
-            int(round(performance_bonus_tax_new))
-        ],
-        "New Net Received": [
-            int(round(joining_bonus_net_new)),
-            int(round(relocation_bonus_net_new)),
-            int(round(performance_bonus_net_new))
-        ]
-    })
-
-    st.table(one_time_df)
+    st.caption("Monthly in-hand is calculated only on Fixed Pay. Joining bonus, relocation bonus and non-assured bonus are excluded from monthly salary calculation and are assumed to be taxed when received.")
 
     st.caption(f"Employee PF used for in-hand calculation: {money(employee_pf_for_inhand)}")
     if employer_pf_included:
