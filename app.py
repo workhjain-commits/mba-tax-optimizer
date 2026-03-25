@@ -7,7 +7,7 @@ import numpy as np
 from io import StringIO
 from datetime import date
 
-st.set_page_config(page_title="MBA Tax Optimizer", layout="wide")
+st.set_page_config(page_title="Tax Calculator", layout="wide")
 
 # -------------------------
 # RULES
@@ -128,7 +128,7 @@ def money(x):
 # UI
 # -------------------------
 
-st.title("MBA Tax Optimizer — Expanded Questionnaire")
+st.title("Tax Calculator")
 st.caption(f"FY {RULES['fy']}")
 st.warning("This tool is for educational use only and should not be treated as professional tax advice.")
 
