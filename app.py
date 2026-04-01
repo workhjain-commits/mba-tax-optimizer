@@ -1,5 +1,5 @@
 # app.py
-# MBA Tax Optimizer — Final polished version
+# MBA Tax Optimizer — Final polished version with Other Allowances + Education Loan Helper
 
 import streamlit as st
 import pandas as pd
@@ -7,7 +7,7 @@ import numpy as np
 from io import StringIO
 from datetime import date
 
-st.set_page_config(page_title="Tax Calculator", layout="wide")
+st.set_page_config(page_title="TaxWhiz", layout="wide")
 
 # -------------------------
 # RULES
@@ -124,11 +124,35 @@ def money(x):
     return f"₹{int(round(x)):,}"
 
 
+def estimate_education_loan_interest(principal, annual_rate, monthly_emi, months_paid):
+    balance = principal
+    monthly_rate = annual_rate / 12 / 100
+    total_interest_paid = 0
+
+    for _ in range(months_paid):
+        if balance <= 0:
+            break
+
+        interest = balance * monthly_rate
+        principal_repaid = monthly_emi - interest
+
+        if principal_repaid < 0:
+            principal_repaid = 0
+
+        if principal_repaid > balance:
+            principal_repaid = balance
+
+        total_interest_paid += interest
+        balance -= principal_repaid
+
+    return int(round(total_interest_paid))
+
+
 # -------------------------
 # UI
 # -------------------------
 
-st.title("Tax Calculator")
+st.title("TaxWhiz — Expanded Questionnaire")
 st.caption(f"FY {RULES['fy']}")
 st.warning("This tool is for educational use only and should not be treated as professional tax advice.")
 
@@ -176,11 +200,35 @@ with col_left:
     )
 
     st.header("Allowances")
+    st.caption("Rule of thumb: If company gives money without bills → Taxable. If company pays only against bills/proofs → Reimbursement.")
+
     internet_allowance = st.number_input("Internet", value=12000)
+    internet_is_reimb = st.checkbox("Internet requires bills / proofs", value=True)
+
     phone_allowance = st.number_input("Phone", value=0)
+    phone_is_reimb = st.checkbox("Phone requires bills / proofs", value=True)
+
     conveyance_allowance = st.number_input("Conveyance", value=0)
+    conveyance_is_reimb = st.checkbox("Conveyance requires bills / proofs", value=False)
+
     meal_voucher = st.number_input("Meal Voucher", value=0)
+    meal_is_reimb = st.checkbox("Meal Voucher requires bills / proofs", value=False)
+
     lta_claimed = st.number_input("LTA", value=40000)
+
+    st.subheader("Other Allowances / Reimbursements")
+
+    other_allowance_1_name = st.text_input("Other Allowance 1 Name", value="")
+    other_allowance_1_amt = st.number_input("Other Allowance 1 Amount", value=0)
+    other_allowance_1_reimb = st.checkbox("Other Allowance 1 requires bills / proofs", value=False)
+
+    other_allowance_2_name = st.text_input("Other Allowance 2 Name", value="")
+    other_allowance_2_amt = st.number_input("Other Allowance 2 Amount", value=0)
+    other_allowance_2_reimb = st.checkbox("Other Allowance 2 requires bills / proofs", value=False)
+
+    other_allowance_3_name = st.text_input("Other Allowance 3 Name", value="")
+    other_allowance_3_amt = st.number_input("Other Allowance 3 Amount", value=0)
+    other_allowance_3_reimb = st.checkbox("Other Allowance 3 requires bills / proofs", value=False)
 
 with col_right:
     st.header("Section D — 80C Breakup")
@@ -199,7 +247,25 @@ with col_right:
 
     nps_employee = st.number_input("NPS 80CCD(1B)", value=50000)
     health_insurance = st.number_input("Health Insurance 80D", value=25000)
-    education_loan_interest = st.number_input("Education Loan Interest 80E", value=0)
+
+    education_loan_interest = st.number_input("Education Loan Interest 80E (if known)", value=0)
+
+    st.subheader("Education Loan Interest Helper (Optional)")
+    st.caption("Use this only if you are unsure about your annual education loan interest paid.")
+
+    use_edu_loan_helper = st.checkbox("Help me estimate education loan interest", value=False)
+
+    edu_loan_principal = 0
+    edu_loan_rate = 0.0
+    edu_loan_emi = 0
+    edu_loan_months_paid = 12
+
+    if use_edu_loan_helper:
+        edu_loan_principal = st.number_input("Outstanding Education Loan Principal", value=500000)
+        edu_loan_rate = st.number_input("Annual Interest Rate (%)", value=9.0)
+        edu_loan_emi = st.number_input("Monthly EMI", value=10000)
+        edu_loan_months_paid = st.slider("How many EMIs will you pay this FY?", min_value=1, max_value=12, value=12)
+
     home_loan_interest = st.number_input("Home Loan Interest", value=0)
 
 # -------------------------
@@ -208,9 +274,42 @@ with col_right:
 
 if st.button("Run full analysis"):
 
+    estimated_edu_interest = 0
+
+    if use_edu_loan_helper and education_loan_interest == 0:
+        estimated_edu_interest = estimate_education_loan_interest(
+            edu_loan_principal,
+            edu_loan_rate,
+            edu_loan_emi,
+            edu_loan_months_paid
+        )
+        education_loan_interest = estimated_edu_interest
+
     hra_exempt = compute_hra_exemption(basic, da, hra, rent_annual, is_metro) if lives_rented else 0
 
-    reimbursements = internet_allowance + phone_allowance + conveyance_allowance + meal_voucher
+    reimbursements = 0
+
+    if internet_is_reimb:
+        reimbursements += internet_allowance
+
+    if phone_is_reimb:
+        reimbursements += phone_allowance
+
+    if conveyance_is_reimb:
+        reimbursements += conveyance_allowance
+
+    if meal_is_reimb:
+        reimbursements += meal_voucher
+
+    if other_allowance_1_reimb:
+        reimbursements += other_allowance_1_amt
+
+    if other_allowance_2_reimb:
+        reimbursements += other_allowance_2_amt
+
+    if other_allowance_3_reimb:
+        reimbursements += other_allowance_3_amt
+
     exemptions_old = hra_exempt + reimbursements + lta_claimed
 
     deductions_old = {
@@ -271,6 +370,18 @@ if st.button("Run full analysis"):
     annual_in_hand_old_excluding_one_time = monthly_in_hand_old * 12
     annual_in_hand_new_excluding_one_time = monthly_in_hand_new * 12
 
+    # Other reimbursement total for display
+    other_reimb_total = 0
+
+    if other_allowance_1_reimb:
+        other_reimb_total += other_allowance_1_amt
+
+    if other_allowance_2_reimb:
+        other_reimb_total += other_allowance_2_amt
+
+    if other_allowance_3_reimb:
+        other_reimb_total += other_allowance_3_amt
+
     # -------------------------
     # MAIN TAX SUMMARY TABLE
     # -------------------------
@@ -285,6 +396,7 @@ if st.button("Run full analysis"):
             "  ↳ Phone Reimbursement",
             "  ↳ Conveyance",
             "  ↳ Meal Voucher",
+            "  ↳ Other Reimbursements",
             "  ↳ LTA",
 
             "Deductions",
@@ -304,10 +416,11 @@ if st.button("Run full analysis"):
 
             int(round(exemptions_old)),
             int(round(hra_exempt)),
-            int(round(internet_allowance)),
-            int(round(phone_allowance)),
-            int(round(conveyance_allowance)),
-            int(round(meal_voucher)),
+            int(round(internet_allowance if internet_is_reimb else 0)),
+            int(round(phone_allowance if phone_is_reimb else 0)),
+            int(round(conveyance_allowance if conveyance_is_reimb else 0)),
+            int(round(meal_voucher if meal_is_reimb else 0)),
+            int(round(other_reimb_total)),
             int(round(lta_claimed)),
 
             int(round(
@@ -333,6 +446,7 @@ if st.button("Run full analysis"):
         "New Regime": [
             int(round(gross_income)),
 
+            0,
             0,
             0,
             0,
@@ -429,8 +543,7 @@ if st.button("Run full analysis"):
             int(round(fixed_pay)),
             0,
             int(round(
-                allowed_new["standard_deduction"]
-                + allowed_new["80ccd_1b"]
+                allowed_new["standard_deduction"] + allowed_new["80ccd_1b"]
             )),
             int(round(new_taxable_fixed_only)),
             int(round(new_tax_fixed_only)),
@@ -442,6 +555,9 @@ if st.button("Run full analysis"):
     st.table(tds_breakdown_df)
 
     st.caption("Monthly TDS is calculated as Annual Tax on Fixed Pay only ÷ 12. One-time payouts like Joining Bonus, Relocation Bonus and Non-Assured Bonus are excluded from this monthly TDS calculation.")
+
+    if use_edu_loan_helper and estimated_edu_interest > 0:
+        st.caption(f"Estimated education loan interest used for 80E deduction: {money(estimated_edu_interest)}")
 
     st.caption(f"Employee PF used for in-hand calculation: {money(employee_pf_for_inhand)}")
     if employer_pf_included:
