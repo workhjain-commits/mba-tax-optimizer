@@ -587,10 +587,11 @@ if st.button("Run full analysis"):
     if reimbursements > 0:
         st.write("Convert allowances into proof-based reimbursements if company policy allows")
 
-    if old_tax < new_tax:
-        st.success(f"Old Regime Better — Save {money(new_tax - old_tax)}")
-    else:
-        st.success(f"New Regime Better — Save {money(old_tax - new_tax)}")
+if old_tax < new_tax:
+    st.success(f"Old Regime Better — Save {money(new_tax - old_tax)}")
+    st.info("Old regime may require maintaining and submitting more proofs/documents (such as rent receipts, insurance proofs, investment proofs, etc.), so choose accordingly.")
+else:
+    st.success(f"New Regime Better — Save {money(old_tax - new_tax)}")
 
     st.markdown("---")
     st.caption(
@@ -599,3 +600,4 @@ if st.button("Run full analysis"):
         "Actual tax liability, payroll deductions, exemptions, and take-home salary may vary based on employer payroll policies, declarations submitted, proofs furnished, timing of payouts, "
         "state-specific rules, amendments in tax law, and individual circumstances. Users are strongly advised to verify final decisions with their HR/payroll team, Chartered Accountant (CA), or qualified tax professional before acting on the outputs of this tool."
     )
+    st.caption("Made by Harsh Jain | IIM Indore | Class of 2026")
