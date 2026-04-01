@@ -1,5 +1,5 @@
 # app.py
-# MBA Tax Optimizer — Final polished version with Other Allowances + Education Loan Helper
+# TaxWhiz — Final version
 
 import streamlit as st
 import pandas as pd
@@ -336,7 +336,6 @@ if st.button("Run full analysis"):
     # -------------------------
     # MONTHLY IN-HAND CALCULATION
     # -------------------------
-    # Monthly salary should be based ONLY on fixed pay
 
     old_tax_fixed_only, old_taxable_fixed_only = compute_old_regime_tax(
         fixed_pay,
@@ -354,7 +353,6 @@ if st.button("Run full analysis"):
     monthly_tds_new = int(round(new_tax_fixed_only / 12))
 
     # Employee PF for in-hand
-    # If salary breakup employee PF is 0, use EPF from 80C section
     employee_pf_for_inhand = employee_pf if employee_pf > 0 else epf
     employee_pf_monthly = int(round(employee_pf_for_inhand / 12))
 
@@ -587,11 +585,11 @@ if st.button("Run full analysis"):
     if reimbursements > 0:
         st.write("Convert allowances into proof-based reimbursements if company policy allows")
 
-if old_tax < new_tax:
-    st.success(f"Old Regime Better — Save {money(new_tax - old_tax)}")
-    st.info("Old regime may require maintaining and submitting more proofs/documents (such as rent receipts, insurance proofs, investment proofs, etc.), so choose accordingly.")
-else:
-    st.success(f"New Regime Better — Save {money(old_tax - new_tax)}")
+    if old_tax < new_tax:
+        st.success(f"Old Regime Better — Save {money(new_tax - old_tax)}")
+        st.info("Old regime may require maintaining and submitting more proofs/documents (such as rent receipts, insurance proofs, investment proofs, etc.), so choose accordingly.")
+    else:
+        st.success(f"New Regime Better — Save {money(old_tax - new_tax)}")
 
     st.markdown("---")
     st.caption(
