@@ -28,13 +28,14 @@ RULES = {
         {"upto": 1000000, "rate": 0.20},
         {"upto": 999999999, "rate": 0.30}
     ],
-    "tax_slabs_new": [
-        {"upto": 300000, "rate": 0},
-        {"upto": 700000, "rate": 0.05},
-        {"upto": 1000000, "rate": 0.10},
-        {"upto": 1200000, "rate": 0.15},
-        {"upto": 1500000, "rate": 0.20},
-        {"upto": 999999999, "rate": 0.30}
+   "tax_slabs_new": [
+    {"upto": 400000, "rate": 0},
+    {"upto": 800000, "rate": 0.05},
+    {"upto": 1200000, "rate": 0.10},
+    {"upto": 1600000, "rate": 0.15},
+    {"upto": 2000000, "rate": 0.20},
+    {"upto": 2400000, "rate": 0.25},
+    {"upto": 999999999, "rate": 0.30}
     ],
     "new_regime_allowed": {
         "standard_deduction": True,
